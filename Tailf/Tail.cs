@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 using System.IO;
 using System.Threading;
@@ -8,76 +7,75 @@ using System.Text.RegularExpressions;
 
 namespace Tailf
 {
-    class Tail
+    public class Tail
     {
-        ManualResetEvent me;
+        ManualResetEvent _resetEvent;
+        public event EventHandler<TailEventArgs> Changed;
 
-        const string defaultLevel = "INFO";
+        const string default_level = "INFO";
+        private string _currentLevel = default_level;
 
-        string currentLevel = defaultLevel;
+        const int pollInterval = 100;
+        const int bufSize = 4096;
 
-        public class TailEventArgs : EventArgs
-        {
-            public string Level { get; set; }
-            public string Line { get; set; }
-        }
+        string previous = "";
+        private long prevLen = -1;
        
-        long prevLen = -1;
-       
-        string path;
-        int nLines;
-        public string LineFilter { get; set; }
+        private string _filePath;
+        private int _numLines;
 
-        public string LevelRegex { get; set; }
+        private bool requestForExit = false;
 
-        Regex lineFilterRegex;
-        Regex levelRegex;
-        public Tail(string path,int nLines)
+        private Regex _lineFilterRegex;
+        private Regex _levelRegex;
+
+        public Tail(TailfParameters parameters)
         {
-            this.path = path;
-            this.nLines = nLines;
-            me = new ManualResetEvent(false);
-            
+            _filePath = parameters.FilePath;
+            _numLines = parameters.NumLines;
+
+            if (!string.IsNullOrEmpty(parameters.LineFilter))
+                _lineFilterRegex = new Regex(parameters.LineFilter);
+
+            if (!string.IsNullOrEmpty(parameters.LevelRegex))
+                _levelRegex = new Regex(parameters.LevelRegex, RegexOptions.Compiled | RegexOptions.Multiline);
+
+            _resetEvent = new ManualResetEvent(false);
         }
-        bool requestForExit = false;
-        public void Stop()
-        {
-            requestForExit = true;
-            me.WaitOne();
-        }
+
+
         public void Run()
         {
-            if (!string.IsNullOrEmpty(LineFilter))
-                lineFilterRegex = new Regex(LineFilter);
-
-            if (!string.IsNullOrEmpty(LevelRegex))
-                levelRegex = new Regex(LevelRegex, RegexOptions.Compiled | RegexOptions.Multiline);
-
-            if (!File.Exists(path))
+            if (!File.Exists(_filePath))
             {
-                throw new FileNotFoundException("File does not exist:"+path);
+                throw new FileNotFoundException("File does not exist:" + _filePath);
             }
-            FileInfo fi = new FileInfo(path);
-            prevLen = fi.Length;
-            MakeTail(nLines, path);
-            ThreadPool.QueueUserWorkItem(new WaitCallback(q=> ChangeLoop() ));
+            var fileInfo = new FileInfo(_filePath);
+            prevLen = fileInfo.Length;
+            MakeTail(_numLines, _filePath);
+
+            ThreadPool.QueueUserWorkItem(new WaitCallback(q => EnterMainLoop()));
         }
 
-        private void ChangeLoop()
+        private void EnterMainLoop()
         {
             while (!requestForExit)
             {
                 fw_Changed();
                 Thread.Sleep(pollInterval);
             }
-            me.Set();
+            _resetEvent.Set();
         }
-        static readonly int pollInterval = 100;
-        static readonly int bufSize = 4096;
-        string previous = string.Empty;
+
+        public void Stop()
+        {
+            requestForExit = true;
+            _resetEvent.WaitOne();
+        }
+
         void fw_Changed()
         {
-            FileInfo fi = new FileInfo(path);
+            FileInfo fi = new FileInfo(_filePath);
             if( fi.Exists )
             {
                 if (fi.Length != prevLen)
@@ -90,7 +88,7 @@ namespace Tailf
                     using (var stream = new FileStream(fi.FullName, FileMode.Open, FileAccess.Read, FileShare.Delete | FileShare.ReadWrite))
                     {
                         stream.Seek(prevLen, SeekOrigin.Begin);
-                        if (string.IsNullOrEmpty(LineFilter))
+                        if (_lineFilterRegex != null)
                         {
                             using (StreamReader sr = new StreamReader(stream))
                             {
@@ -128,7 +126,7 @@ namespace Tailf
                                             {
                                                 string line = string.Concat(previous, current);
 
-                                                if (lineFilterRegex.IsMatch(line))
+                                                if (_lineFilterRegex.IsMatch(line))
                                                 {
                                                     OnChanged(string.Concat(line, Environment.NewLine));
                                                 }
@@ -154,7 +152,6 @@ namespace Tailf
             }
             
         }
-        public event EventHandler<TailEventArgs> Changed;
         private void MakeTail(int nLines,string path)
         {
             List<string> lines = new List<string>();
@@ -164,9 +161,9 @@ namespace Tailf
                 string line;
                 while( null != (line=sr.ReadLine() ) )
                 {
-                    if (!string.IsNullOrEmpty(LineFilter))
+                    if (_lineFilterRegex != null)
                     {
-                        if (lineFilterRegex.IsMatch(line))
+                        if (_lineFilterRegex.IsMatch(line))
                         {
                             EnqueueLine(nLines, lines, line);
                         }
@@ -199,23 +196,23 @@ namespace Tailf
             if (null == Changed)
                 return;
 
-            if (null == levelRegex)
+            if (null == _levelRegex)
             {
-                Changed(this, new TailEventArgs() { Line = l, Level = currentLevel });
+                Changed(this, new TailEventArgs() { Line = l, Level = _currentLevel });
                 return;
             }
 
-            var match = levelRegex.Match(l);
+            var match = _levelRegex.Match(l);
 
             if (null == match || !match.Success)
             {
-                Changed(this, new TailEventArgs() { Line = l, Level = currentLevel });
+                Changed(this, new TailEventArgs() { Line = l, Level = _currentLevel });
                 return;
             }
 
-            currentLevel = match.Groups["level"].Value;
+            _currentLevel = match.Groups["level"].Value;
 
-            Changed(this, new TailEventArgs() { Line = l, Level = currentLevel });
+            Changed(this, new TailEventArgs() { Line = l, Level = _currentLevel });
         }
     }
 }
