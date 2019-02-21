@@ -126,7 +126,7 @@ namespace Tailf
                                             {
                                                 string line = string.Concat(previous, current);
 
-                                                if (_lineFilterRegex.IsMatch(line))
+                                                if (_lineFilterRegex == null || (_lineFilterRegex != null && _lineFilterRegex.IsMatch(line)))
                                                 {
                                                     OnChanged(string.Concat(line, Environment.NewLine));
                                                 }
@@ -161,14 +161,7 @@ namespace Tailf
                 string line;
                 while( null != (line=sr.ReadLine() ) )
                 {
-                    if (_lineFilterRegex != null)
-                    {
-                        if (_lineFilterRegex.IsMatch(line))
-                        {
-                            EnqueueLine(nLines, lines, line);
-                        }
-                    }
-                    else
+                    if (_lineFilterRegex == null || (_lineFilterRegex != null && _lineFilterRegex.IsMatch(line)))
                     {
                         EnqueueLine(nLines, lines, line);
                     }
@@ -193,10 +186,10 @@ namespace Tailf
 
         private void OnChanged(string l)
         {
-            if (null == Changed)
+            if (Changed == null)
                 return;
 
-            if (null == _levelRegex)
+            if (_levelRegex == null)
             {
                 Changed(this, new TailEventArgs() { Line = l, Level = _currentLevel });
                 return;
@@ -204,7 +197,7 @@ namespace Tailf
 
             var match = _levelRegex.Match(l);
 
-            if (null == match || !match.Success)
+            if (match == null || !match.Success)
             {
                 Changed(this, new TailEventArgs() { Line = l, Level = _currentLevel });
                 return;
